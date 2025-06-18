@@ -8,7 +8,7 @@ const app = express();
 const port = 3000;
 
 // !! IMPORTANT: The @ in your password has been replaced with %40
-const uri = "mongodb+srv://Hitex-DB:Coconuttt%4019910@cluster0.ezrt0al.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+const uri = process.env.MONGODB_URI;
 
 // Create a new MongoClient
 const client = new MongoClient(uri, {

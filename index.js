@@ -1,34 +1,29 @@
-// 1. IMPORTS (All at the top)
+// 1. IMPORTS
 const express = require('express');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion } = require('mongodb');
+const bcrypt = require('bcryptjs'); // <-- Add this for password hashing
+const jwt = require('jsonwebtoken'); // <-- Add this for login tokens
 
 // 2. SETUP
 const app = express();
 const port = 3000;
+const uri = process.env.MONGODB_URI; // Your secret URI from Render's environment variables
 
-// !! IMPORTANT: The @ in your password has been replaced with %40
-const uri = process.env.MONGODB_URI;
+// A secret key for signing JWTs. In a real app, this should also be an environment variable.
+const JWT_SECRET = 'a-secret-key-for-jwt-that-should-be-long-and-random';
 
-// Create a new MongoClient
 const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  }
+  serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
 });
 
-// This function will connect to the DB and set up the routes
 async function run() {
   try {
-    // Connect the client to the server
     await client.connect();
     console.log("Successfully connected to MongoDB!");
 
-    // Define the database and collection
-    const database = client.db("HitexDB"); // You can name your database anything
-    const usersCollection = database.collection("users"); // Collection to store user data
+    const database = client.db("HitexDB");
+    const usersCollection = database.collection("users");
 
     // 3. MIDDLEWARE
     app.use(cors());
@@ -36,33 +31,75 @@ async function run() {
     app.use(express.urlencoded({ extended: true }));
 
     // 4. ROUTES
-
     app.get('/', (req, res) => {
       res.send('Hello, your server is running and connected to MongoDB!');
     });
 
-    // The route that now SAVES data to the database
-    app.post('/register', async (req, res) => { // <-- Note this is now an async function
+    // --- UPDATED REGISTRATION ROUTE ---
+    app.post('/register', async (req, res) => {
       try {
-        const userData = req.body;
-        console.log('Received registration data:', userData);
+        const { fullName, email, password, manuscriptType } = req.body;
 
-        // Check if user already exists
-        const existingUser = await usersCollection.findOne({ email: userData.email });
+        const existingUser = await usersCollection.findOne({ email: email });
         if (existingUser) {
           return res.status(400).send({ message: 'User with this email already exists.' });
         }
 
-        // Insert the new user data into the 'users' collection
-        const result = await usersCollection.insertOne(userData);
-        console.log(`A document was inserted with the _id: ${result.insertedId}`);
+        // Hash the password before storing it
+        const hashedPassword = await bcrypt.hash(password, 10); // 10 is the salt rounds
 
-        // Send a success response
+        const newUser = {
+          fullName,
+          email,
+          password: hashedPassword, // <-- Store the hashed password
+          manuscriptType,
+          createdAt: new Date()
+        };
+
+        const result = await usersCollection.insertOne(newUser);
         res.status(201).send({ message: 'User registered successfully!', userId: result.insertedId });
+      } catch (error) {
+        res.status(500).send({ message: 'Error registering user' });
+      }
+    });
+
+    // --- NEW LOGIN ROUTE ---
+    app.post('/login', async (req, res) => {
+      try {
+        const { email, password } = req.body;
+
+        // 1. Find the user by their email
+        const user = await usersCollection.findOne({ email: email });
+        if (!user) {
+          return res.status(404).send({ message: "User not found." });
+        }
+
+        // 2. Compare the submitted password with the stored hashed password
+        const isPasswordCorrect = await bcrypt.compare(password, user.password);
+        if (!isPasswordCorrect) {
+          return res.status(400).send({ message: "Invalid password." });
+        }
+
+        // 3. If password is correct, create a JSON Web Token (JWT)
+        const token = jwt.sign(
+          { id: user._id, email: user.email }, // Payload: data to include in the token
+          JWT_SECRET,                          // The secret key
+          { expiresIn: '1h' }                  // Token expiration time
+        );
+
+        // 4. Send the token back to the front-end
+        res.status(200).send({
+          message: "Login successful!",
+          token: token,
+          user: {
+            id: user._id,
+            email: user.email,
+            fullName: user.fullName
+          }
+        });
 
       } catch (error) {
-        console.error("Failed to register user:", error);
-        res.status(500).send({ message: 'Error registering user' });
+        res.status(500).send({ message: "An error occurred during login." });
       }
     });
 
@@ -70,12 +107,9 @@ async function run() {
     console.error("Failed to connect to MongoDB", err);
   }
 }
-
-// Call the run function to start the connection and set up routes
 run();
 
-// 5. START SERVER (This should be last)
+// 5. START SERVER
 app.listen(port, () => {
   console.log(`Server is listening at http://localhost:${port}`);
 });
-// Ghana 

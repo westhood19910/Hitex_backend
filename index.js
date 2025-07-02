@@ -79,7 +79,10 @@ async function run() {
         if (!isPasswordCorrect) {
           return res.status(400).send({ message: "Invalid password." });
         }
-
+              await usersCollection.updateOne(
+           { _id: user._id }, // Filter to find the correct user
+           { $set: { lastLogin: new Date() } } // The update to apply
+                 );
         // 3. If password is correct, create a JSON Web Token (JWT)
         const token = jwt.sign(
           { id: user._id, email: user.email }, // Payload: data to include in the token

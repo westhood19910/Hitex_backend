@@ -1,17 +1,29 @@
 // 1. IMPORTS
 const express = require('express');
 const cors = require('cors');
-const { MongoClient, ServerApiVersion } = require('mongodb');
-const bcrypt = require('bcryptjs'); // <-- Add this for password hashing
-const jwt = require('jsonwebtoken'); // <-- Add this for login tokens
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
 
 // 2. SETUP
 const app = express();
 const port = 3000;
-const uri = process.env.MONGODB_URI; // Your secret URI from Render's environment variables
+const uri = process.env.MONGODB_URI;
+const JWT_SECRET = process.env.JWT_SECRET || 'a-default-secret-key-that-is-long';
 
-// A secret key for signing JWTs. In a real app, this should also be an environment variable.
-const JWT_SECRET = 'a-secret-key-for-jwt-that-should-be-long-and-random';
+// --- Multer Configuration for File Uploads ---
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/');
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+const upload = multer({ storage: storage });
 
 const client = new MongoClient(uri, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true }
@@ -24,85 +36,69 @@ async function run() {
 
     const database = client.db("HitexDB");
     const usersCollection = database.collection("users");
+    const manuscriptsCollection = database.collection("manuscripts");
 
     // 3. MIDDLEWARE
     app.use(cors());
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
+    // --- Authentication Middleware ---
+    const authenticateToken = (req, res, next) => {
+      const authHeader = req.headers['authorization'];
+      const token = authHeader && authHeader.split(' ')[1];
+      if (token == null) return res.sendStatus(401);
+
+      jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.sendStatus(403);
+        req.user = user;
+        next();
+      });
+    };
+
     // 4. ROUTES
-    app.get('/', (req, res) => {
-      res.send('Hello, your server is running and connected to MongoDB!');
+    app.get('/', (req, res) => res.send('Server is live and connected to MongoDB!'));
+
+    app.post('/register', async (req, res) => {
+        // Your existing registration code...
     });
 
-    // --- UPDATED REGISTRATION ROUTE ---
-    app.post('/register', async (req, res) => {
-      try {
-        const { fullName, email, password, manuscriptType } = req.body;
+    app.post('/login', async (req, res) => {
+        // Your existing login code with the lastLogin update...
+    });
 
-        const existingUser = await usersCollection.findOne({ email: email });
-        if (existingUser) {
-          return res.status(400).send({ message: 'User with this email already exists.' });
+    // --- MANUSCRIPT SUBMISSION ROUTE ---
+    app.post('/submit-manuscript', authenticateToken, upload.single('manuscriptFile'), async (req, res) => {
+      try {
+        if (!req.file) {
+          return res.status(400).send({ message: 'No file was uploaded.' });
         }
 
-        // Hash the password before storing it
-        const hashedPassword = await bcrypt.hash(password, 10); // 10 is the salt rounds
+        const { wordCount, serviceType, fullName, email, documentType, deadline, message } = req.body;
+        const userId = req.user.id; 
 
-        const newUser = {
-          fullName,
-          email,
-          password: hashedPassword, // <-- Store the hashed password
-          manuscriptType,
-          createdAt: new Date()
+        const newManuscript = {
+          userId: new ObjectId(userId),
+          wordCount,
+          serviceType,
+          originalName: req.file.originalname,
+          fileName: req.file.filename,
+          filePath: req.file.path,
+          uploadDate: new Date(),
+          // Include other form details
+          authorName: fullName,
+          authorEmail: email,
+          docType: documentType,
+          requestedDeadline: deadline,
+          projectDetails: message
         };
 
-        const result = await usersCollection.insertOne(newUser);
-        res.status(201).send({ message: 'User registered successfully!', userId: result.insertedId });
-      } catch (error) {
-        res.status(500).send({ message: 'Error registering user' });
-      }
-    });
-
-    // --- NEW LOGIN ROUTE ---
-    app.post('/login', async (req, res) => {
-      try {
-        const { email, password } = req.body;
-
-        // 1. Find the user by their email
-        const user = await usersCollection.findOne({ email: email });
-        if (!user) {
-          return res.status(404).send({ message: "User not found." });
-        }
-
-        // 2. Compare the submitted password with the stored hashed password
-        const isPasswordCorrect = await bcrypt.compare(password, user.password);
-        if (!isPasswordCorrect) {
-          return res.status(400).send({ message: "Invalid password." });
-        }
-              await usersCollection.updateOne(
-           { _id: user._id }, // Filter to find the correct user
-           { $set: { lastLogin: new Date() } } // The update to apply
-                 );
-        // 3. If password is correct, create a JSON Web Token (JWT)
-        const token = jwt.sign(
-          { id: user._id, email: user.email }, // Payload: data to include in the token
-          JWT_SECRET,                          // The secret key
-          { expiresIn: '1h' }                  // Token expiration time
-        );
-
-        // 4. Send the token back to the front-end
-        res.status(200).send({
-          message: "Login successful!",
-          token: token,
-          user: {
-            id: user._id,
-            email: user.email,
-            fullName: user.fullName
-          }
-        });
+        const result = await manuscriptsCollection.insertOne(newManuscript);
+        res.status(201).send({ message: 'Manuscript submitted successfully!', manuscriptId: result.insertedId });
 
       } catch (error) {
-        res.status(500).send({ message: "An error occurred during login." });
+        console.error("Failed to submit manuscript:", error);
+        res.status(500).send({ message: 'Error submitting manuscript' });
       }
     });
 

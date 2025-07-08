@@ -60,13 +60,12 @@ async function run() {
     app.get('/', (req, res) => res.send('Server is live and connected to MongoDB!'));
 
     app.post('/register', async (req, res) => {
-        // Your existing registration code...
+        
     });
 
     app.post('/login', async (req, res) => {
-        // Your existing login code with the lastLogin update...
+        
     });
-
     // --- MANUSCRIPT SUBMISSION ROUTE ---
     app.post('/submit-manuscript', authenticateToken, upload.single('manuscriptFile'), async (req, res) => {
       try {
@@ -85,7 +84,7 @@ async function run() {
           fileName: req.file.filename,
           filePath: req.file.path,
           uploadDate: new Date(),
-          // Include other form details
+          // Include 
           authorName: fullName,
           authorEmail: email,
           docType: documentType,
@@ -98,7 +97,7 @@ async function run() {
 
       } catch (error) {
         console.error("Failed to submit manuscript:", error);
-        res.status(500).send({ message: 'Error submitting manuscript' });
+        res.status(500).send({ message: 'Error submitting manuscript'});
       }
     });
 

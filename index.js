@@ -1,6 +1,6 @@
 // 1. IMPORTS
 const express = require('express');
-const cors = require('cors');
+const cors = require('cors'); // We will use cors
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -11,13 +11,11 @@ const path = require('path');
 const app = express();
 const port = 3000;
 const uri = process.env.MONGODB_URI;
-const JWT_SECRET = process.env.JWT_SECRET || 'a-default-secret-key-that-is-long';
+const JWT_SECRET = 'a-secret-key-for-jwt-that-should-be-long-and-random';
 
-// --- Multer Configuration for File Uploads ---
+// ... multer config ...
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/');
-  },
+  destination: function (req, file, cb) { cb(null, 'uploads/'); },
   filename: function (req, file, cb) {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
@@ -39,73 +37,31 @@ async function run() {
     const manuscriptsCollection = database.collection("manuscripts");
 
     // 3. MIDDLEWARE
-    app.use(cors());
+    app.use(cors()); // Use CORS
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
+    app.use('/uploads', express.static('uploads'));
 
-    // --- Authentication Middleware ---
-    const authenticateToken = (req, res, next) => {
-      const authHeader = req.headers['authorization'];
-      const token = authHeader && authHeader.split(' ')[1];
-      if (token == null) return res.sendStatus(401);
-
-      jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.sendStatus(403);
-        req.user = user;
-        next();
-      });
-    };
+    // ... your authenticateToken middleware ...
+    const authenticateToken = (req, res, next) => { /* ... same as before ... */ };
 
     // 4. ROUTES
-    app.get('/', (req, res) => res.send('Server is live and connected to MongoDB!'));
 
-    app.post('/register', async (req, res) => {
-        
+    // === NEW, SIMPLE TEST ROUTE ===
+    app.post('/test-route', (req, res) => {
+      console.log("'/test-route' was successfully hit!");
+      res.status(200).send({ message: "Test successful! The server is reachable." });
     });
 
-    app.post('/login', async (req, res) => {
-        
-    });
-    // --- MANUSCRIPT SUBMISSION ROUTE ---
-    app.post('/submit-manuscript', authenticateToken, upload.single('manuscriptFile'), async (req, res) => {
-      try {
-        if (!req.file) {
-          return res.status(400).send({ message: 'No file was uploaded.' });
-        }
+    // ... all your other routes (/register, /login, /submit-manuscript) remain here ...
+    app.get('/', (req, res) => { res.send('Hello, your server is running and connected to MongoDB!'); });
+    app.post('/register', async (req, res) => { /* ... same as before ... */ });
+    app.post('/login', async (req, res) => { /* ... same as before ... */ });
+    app.post('/submit-manuscript', authenticateToken, upload.single('manuscriptFile'), async (req, res) => { /* ... same as before ... */ });
 
-        const { wordCount, serviceType, fullName, email, documentType, deadline, message } = req.body;
-        const userId = req.user.id; 
-
-        const newManuscript = {
-          userId: new ObjectId(userId),
-          wordCount,
-          serviceType,
-          originalName: req.file.originalname,
-          fileName: req.file.filename,
-          filePath: req.file.path,
-          uploadDate: new Date(),
-          // Include 
-          authorName: fullName,
-          authorEmail: email,
-          docType: documentType,
-          requestedDeadline: deadline,
-          projectDetails: message
-        };
-
-        const result = await manuscriptsCollection.insertOne(newManuscript);
-        res.status(201).send({ message: 'Manuscript submitted successfully!', manuscriptId: result.insertedId });
-
-      } catch (error) {
-        console.error("Failed to submit manuscript:", error);
-        res.status(500).send({ message: 'Error submitting manuscript'});
-      }
-    });
-
-  } catch (err) {
-    console.error("Failed to connect to MongoDB", err);
-  }
+  } catch (err) { console.error("Failed to connect to MongoDB", err); }
 }
-run();
+run().catch(console.dir);
 
 // 5. START SERVER
 app.listen(port, () => {

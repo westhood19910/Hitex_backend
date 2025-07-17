@@ -186,21 +186,56 @@ async function run() {
         } catch (error) { res.status(500).send({ message: "Failed to fetch editors." }); }
     });
 
-    app.post('/admin/assign-job/:manuscriptId', authenticateAdmin, async (req, res) => {
-        try {
-            const { manuscriptId } = req.params;
-            const { editorId } = req.body;
-            if (!ObjectId.isValid(manuscriptId) || !ObjectId.isValid(editorId)) {
-                return res.status(400).send({ message: "Invalid Manuscript or Editor ID." });
-            }
-            const result = await manuscriptsCollection.updateOne(
-                { _id: new ObjectId(manuscriptId) },
-                { $set: { assignedEditorId: new ObjectId(editorId), status: 'Assigned' } }
-            );
-            if (result.matchedCount === 0) return res.status(404).send({ message: "Manuscript not found." });
-            res.status(200).send({ message: `Job assigned successfully to editor ${editorId}` });
-        } catch (error) { res.status(500).send({ message: "Error assigning job." }); }
-    });
+   // REPLACE your existing '/admin/assign-job' route with this one in index.js
+
+app.post('/admin/assign-job/:manuscriptId', authenticateAdmin, async (req, res) => {
+    try {
+        const { manuscriptId } = req.params;
+        
+        // Get all the new details from the pop-up form
+        const { 
+            editorId, 
+            jobType, 
+            serviceType,
+            editableWords,
+            effectiveEditableWords,
+            targetJournal,
+            languageRequirements,
+            assignmentStartDate,
+            assignmentReturnDate
+        } = req.body;
+
+        if (!ObjectId.isValid(manuscriptId) || !ObjectId.isValid(editorId)) {
+            return res.status(400).send({ message: "Invalid Manuscript or Editor ID." });
+        }
+
+        const updateFields = {
+            assignedEditorId: new ObjectId(editorId),
+            status: 'Assigned',
+            jobType,
+            serviceType, // Overwrite original service type if needed
+            editableWords,
+            effectiveEditableWords,
+            targetJournal,
+            languageRequirements,
+            assignmentStartDate: new Date(assignmentStartDate),
+            assignmentReturnDate: new Date(assignmentReturnDate)
+        };
+
+        const result = await manuscriptsCollection.updateOne(
+            { _id: new ObjectId(manuscriptId) },
+            { $set: updateFields }
+        );
+        
+        if (result.matchedCount === 0) {
+            return res.status(404).send({ message: "Manuscript not found." });
+        }
+        res.status(200).send({ message: `Job assigned successfully to editor ${editorId}` });
+    } catch (error) {
+        console.error("Error assigning job:", error);
+        res.status(500).send({ message: "Error assigning job." });
+    }
+});
 
     // 5. START THE SERVER (Inside the try block)
     app.listen(port, () => {

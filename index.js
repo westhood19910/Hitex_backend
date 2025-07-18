@@ -41,9 +41,7 @@ async function run() {
     const manuscriptsCollection = database.collection("manuscripts");
 
     // 3. MIDDLEWARE SETUP
-    // This explicit CORS setup handles complex, authenticated requests.
-    app.options('*', cors()); // Enable pre-flight for all routes
-    app.use(cors()); // Use CORS for all other requests
+    app.use(cors());
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     app.use('/uploads', express.static('uploads'));
@@ -60,6 +58,7 @@ async function run() {
             next();
         });
     };
+
     const authenticateAdmin = (req, res, next) => {
         const authHeader = req.headers['authorization'];
         const token = authHeader && authHeader.split(' ')[1];

@@ -36,17 +36,14 @@ async function run() {
     await client.connect();
     console.log("Successfully connected to MongoDB!");
 
-    // Define database and collections
     const database = client.db("HitexDB");
     const usersCollection = database.collection("users");
     const manuscriptsCollection = database.collection("manuscripts");
 
     // 3. MIDDLEWARE SETUP
-    app.use(cors({
-        origin: "*",
-        methods: "GET,POST,PUT,DELETE,OPTIONS",
-        allowedHeaders: "Content-Type,Authorization"
-    }));
+    // This explicit CORS setup handles complex, authenticated requests.
+    app.options('*', cors()); // Enable pre-flight for all routes
+    app.use(cors()); // Use CORS for all other requests
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     app.use('/uploads', express.static('uploads'));
@@ -94,7 +91,6 @@ async function run() {
             if (existingUser) return res.status(400).send({ message: 'User with this email already exists.' });
             
             const hashedPassword = await bcrypt.hash(password, 10);
-            // New users default to the 'author' role. Editors must be assigned manually by an admin.
             const newUser = { fullName, email, password: hashedPassword, role: 'author', createdAt: new Date() };
             const result = await usersCollection.insertOne(newUser);
             res.status(201).send({ message: 'User registered successfully!', userId: result.insertedId });
@@ -112,10 +108,8 @@ async function run() {
             
             await usersCollection.updateOne({ _id: user._id }, { $set: { lastLogin: new Date() } });
             
-            // Create a token that includes the user's role
             const token = jwt.sign({ id: user._id, email: user.email, role: user.role || 'author' }, JWT_SECRET, { expiresIn: '8h' });
             
-            // Send back the user's info, including their role
             res.status(200).send({
                 message: "Login successful!",
                 token: token,
@@ -123,7 +117,7 @@ async function run() {
                     id: user._id,
                     email: user.email,
                     fullName: user.fullName,
-                    role: user.role || 'author' // <-- The crucial role field
+                    role: user.role || 'author'
                 }
             });
         } catch (error) { res.status(500).send({ message: "An error occurred during login." }); }
@@ -131,36 +125,84 @@ async function run() {
 
     // --- Protected User/Editor Routes ---
     app.get('/profile', authenticateToken, async (req, res) => {
-        // ... (This route is correct as-is)
+        try {
+            const userProfile = await usersCollection.findOne({ _id: new ObjectId(req.user.id) }, { projection: { password: 0 } });
+            if (!userProfile) return res.status(404).send({ message: 'User profile not found.' });
+            res.status(200).json(userProfile);
+        } catch (error) { res.status(500).send({ message: 'Error fetching user profile.' }); }
     });
 
     app.post('/profile/update', authenticateToken, async (req, res) => {
-        // ... (This route is correct as-is)
+        try {
+            const { fullName, jobTitle, institution } = req.body;
+            const result = await usersCollection.updateOne({ _id: new ObjectId(req.user.id) }, { $set: { fullName, jobTitle, institution } });
+            if (result.matchedCount === 0) return res.status(404).send({ message: 'User not found.' });
+            res.status(200).send({ message: 'Profile updated successfully!' });
+        } catch (error) { res.status(500).send({ message: 'Error updating profile.' }); }
     });
     
     app.post('/submit-manuscript', authenticateToken, upload.single('manuscriptFile'), async (req, res) => {
-      // ... (This route is correct as-is)
+      try {
+        if (!req.file) return res.status(400).send({ message: 'No file was uploaded.' });
+        const { wordCount, serviceType, deadline } = req.body;
+        const manuscriptData = {
+            userId: new ObjectId(req.user.id),
+            status: 'New', wordCount, serviceType, deadline,
+            originalName: req.file.originalname,
+            fileName: req.file.filename,
+            filePath: req.file.path,
+            uploadDate: new Date()
+        };
+        const result = await manuscriptsCollection.insertOne(manuscriptData);
+        res.status(201).send({ message: 'Manuscript submitted successfully!', manuscriptId: result.insertedId });
+      } catch (error) { res.status(500).send({ message: 'Error submitting manuscript.' }); }
     });
 
     app.get('/editor/my-jobs', authenticateToken, async (req, res) => {
-        // ... (This route is correct as-is)
+        try {
+            const editorId = new ObjectId(req.user.id);
+            const assignedJobs = await manuscriptsCollection.find({ assignedEditorId: editorId }).sort({ uploadDate: -1 }).toArray();
+            res.status(200).json(assignedJobs);
+        } catch (error) { res.status(500).send({ message: "Error fetching assigned jobs." }); }
     });
     
     // --- Admin Routes ---
     app.post('/admin/login', (req, res) => {
-        // ... (This route is correct as-is)
+      const { username, password } = req.body;
+      if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+        const token = jwt.sign({ username, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
+        res.status(200).send({ message: "Admin login successful!", token });
+      } else {
+        res.status(401).send({ message: "Invalid admin credentials." });
+      }
     });
 
     app.get('/admin/dashboard', authenticateAdmin, async (req, res) => {
-        // ... (This route is correct as-is)
+      try {
+        const manuscripts = await manuscriptsCollection.find({}).sort({ uploadDate: -1 }).toArray();
+        res.status(200).json(manuscripts);
+      } catch (error) { res.status(500).send({ message: "Failed to fetch manuscripts." }); }
     });
 
     app.get('/admin/editors', authenticateAdmin, async (req, res) => {
-        // ... (This route is correct as-is)
+        try {
+            const editors = await usersCollection.find({ role: 'editor' }, { projection: { fullName: 1, _id: 1 } }).toArray();
+            res.status(200).json(editors);
+        } catch (error) { res.status(500).send({ message: "Failed to fetch editors." }); }
     });
 
     app.post('/admin/assign-job/:manuscriptId', authenticateAdmin, async (req, res) => {
-        // ... (This route is correct as-is)
+        try {
+            const { manuscriptId } = req.params;
+            const { editorId, jobCode, jobType, serviceType, editableWords, effectiveEditableWords, targetJournal, languageRequirements, assignmentStartDate, assignmentReturnDate } = req.body;
+            if (!ObjectId.isValid(manuscriptId) || !ObjectId.isValid(editorId)) {
+                return res.status(400).send({ message: "Invalid Manuscript or Editor ID." });
+            }
+            const updateFields = { assignedEditorId: new ObjectId(editorId), status: 'Assigned', jobCode, jobType, serviceType, editableWords, effectiveEditableWords, targetJournal, languageRequirements, assignmentStartDate: new Date(assignmentStartDate), assignmentReturnDate: new Date(assignmentReturnDate) };
+            const result = await manuscriptsCollection.updateOne({ _id: new ObjectId(manuscriptId) }, { $set: updateFields });
+            if (result.matchedCount === 0) return res.status(404).send({ message: "Manuscript not found." });
+            res.status(200).send({ message: `Job assigned successfully to editor ${editorId}` });
+        } catch (error) { res.status(500).send({ message: "Error assigning job." }); }
     });
 
     // 5. START THE SERVER (Inside the try block for stability)

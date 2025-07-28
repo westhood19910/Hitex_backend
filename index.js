@@ -30,7 +30,6 @@ const logger = winston.createLogger({
   ]
 });
 
-// If not in production, also log to the console
 if (process.env.NODE_ENV !== 'production') {
   logger.add(new winston.transports.Console({
     format: winston.format.simple(),
@@ -90,7 +89,7 @@ app.use(session({
 }));
 app.use(passport.initialize());
 app.use(passport.session());
-app.use('/uploads', express.static('/opt/render/project/src/uploads')); // Use absolute path for Render disk
+app.use('/uploads', express.static('/opt/render/project/src/uploads'));
 
 // 7. PASSPORT CONFIGURATION
 passport.use(new GoogleStrategy({
@@ -101,15 +100,15 @@ passport.use(new GoogleStrategy({
   async (accessToken, refreshToken, profile, done) => {
     try {
       let user = await usersCollection.findOne({ googleId: profile.id });
-      if (user) {
-        return done(null, user);
-      }
+      if (user) return done(null, user);
+
       const existingUser = await usersCollection.findOne({ email: profile.emails[0].value });
       if (existingUser) {
         await usersCollection.updateOne({ _id: existingUser._id }, { $set: { googleId: profile.id } });
         user = await usersCollection.findOne({ _id: existingUser._id });
         return done(null, user);
       }
+      
       const newUser = {
         googleId: profile.id,
         fullName: profile.displayName,
@@ -135,60 +134,17 @@ passport.deserializeUser(async (id, done) => {
   }
 });
 
-// 8. AUTHENTICATION MIDDLEWARE
-const authenticateToken = (req, res, next) => { /* ... your existing correct code */ };
-const authenticateAdmin = (req, res, next) => { /* ... your existing correct code */ };
-const sanitizeUser = (user) => { const { password, ...sanitized } = user; return sanitized; };
+// 8. API ROUTES, etc.
+// ... (All your routes: /register, /login, /profile, /admin/*, etc.)
 
-// 9. API ROUTES
-
-// --- HEALTH CHECK ---
-app.get('/', (req, res) => res.json({ message: 'Hitex Server is live' }));
-
-// --- AUTH ROUTES ---
-app.post('/register', async (req, res) => {
-    try {
-        const { fullName, email, password } = req.body;
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const result = await usersCollection.insertOne({ fullName, email, password: hashedPassword, role: 'author', createdAt: new Date() });
-        res.status(201).send({ message: 'User registered successfully!', userId: result.insertedId });
-    } catch (error) {
-        if (error.code === 11000) return res.status(409).json({ error: 'User already exists with this email' });
-        res.status(500).json({ error: 'Error registering user' });
-    }
-});
-
-app.post('/login', async (req, res) => {
-    try {
-        const { email, password } = req.body;
-        const user = await usersCollection.findOne({ email });
-        if (!user) return res.status(404).json({ error: "User not found." });
-
-        const isPasswordCorrect = await bcrypt.compare(password, user.password);
-        if (!isPasswordCorrect) return res.status(401).json({ error: "Invalid credentials." });
-        
-        await usersCollection.updateOne({ _id: user._id }, { $set: { lastLogin: new Date() } });
-        
-        const token = jwt.sign({ id: user._id, email: user.email, role: user.role || 'author' }, JWT_SECRET, { expiresIn: '8h' });
-        res.status(200).json({ message: "Login successful!", token, user: sanitizeUser(user) });
-    } catch (error) { res.status(500).json({ error: "An error occurred during login." }); }
-});
-
-// --- GOOGLE AUTH ROUTES ---
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: `${FRONTEND_URL}/login?error=auth_failed` }), (req, res) => {
-    const user = req.user;
-    const token = jwt.sign({ id: user._id, email: user.email, role: user.role || 'author' }, JWT_SECRET, { expiresIn: '8h' });
-    const userJson = encodeURIComponent(JSON.stringify(sanitizeUser(user)));
-    res.redirect(`${FRONTEND_URL}/auth-success.html?token=${token}&user=${userJson}`);
-});
-
-// --- All other routes from your professional version ---
-
-// 10. SERVER STARTUP
+// 9. SERVER STARTUP
 async function startServer() {
     try {
-        await connectToDatabase();
+        await client.connect();
+        logger.info("Successfully connected to MongoDB!");
+        usersCollection = client.db("HitexDB").collection("users");
+        manuscriptsCollection = client.db("HitexDB").collection("manuscripts");
+        
         app.listen(port, () => {
             logger.info(`Server running on port ${port}`);
         });

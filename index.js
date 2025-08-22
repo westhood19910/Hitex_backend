@@ -1,4 +1,9 @@
 // 1. IMPORTS
+
+// Add this line at the absolute top of your file
+require('dotenv').config();
+
+// 1. IMPORTS
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -31,6 +36,16 @@ const client = new MongoClient(uri, {
 });
 let usersCollection, manuscriptsCollection;
 
+// Multer Configuration
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, '/opt/render/project/src/uploads'),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+const upload = multer({ storage: storage });
+
 // 4. MIDDLEWARE SETUP
 app.use(helmet());
 app.use(cors({ origin: FRONTEND_URL, credentials: true }));
@@ -41,7 +56,11 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   store: MongoStore.create({ client: client, dbName: 'HitexDB', collectionName: 'sessions' }),
-  cookie: { secure: true, httpOnly: true, sameSite: 'none' }
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production', 
+    httpOnly: true, 
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+  }
 }));
 app.use(passport.initialize());
 app.use(passport.session());
@@ -84,6 +103,20 @@ passport.deserializeUser(async (id, done) => {
   }
 });
 
+// Authentication Middlewares
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (token == null) return res.status(401).send({ message: 'Token required.' });
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) return res.status(403).send({ message: 'Token is invalid or expired.' });
+        req.user = user;
+        next();
+    });
+};
+const authenticateAdmin = (req, res, next) => {
+    // ... same as before
+};
 
 // 6. API ROUTES
 async function startServer() {
@@ -106,8 +139,58 @@ async function startServer() {
             const userJson = encodeURIComponent(JSON.stringify(user));
             res.redirect(`${FRONTEND_URL}/auth-success.html?token=${token}&user=${userJson}`);
         });
+        
+        app.post('/register', async (req, res) => { /* ... same as before ... */ });
+        app.post('/login', async (req, res) => { /* ... same as before ... */ });
+        
+        // --- USER & MANUSCRIPT ROUTES ---
+        app.get('/profile', authenticateToken, async (req, res) => { /* ... same as before ... */ });
+        app.post('/profile/update', authenticateToken, async (req, res) => { /* ... same as before ... */ });
 
-        // ... (all your other routes like /login, /register, etc. would go here) ...
+        // REPLACE your existing '/submit-manuscript' route with this corrected version
+
+        app.post('/submit-manuscript', authenticateToken, upload.single('manuscriptFile'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'A manuscript file is required.' });
+        }
+
+        const {
+            wordCount, serviceType, salutation, firstName, lastName,
+            email, mobile, howHeard, docType, subjectArea,
+            langStyle, formatting, instructions, editScope, startWork
+        } = req.body;
+
+        const manuscriptData = {
+            userId: new ObjectId(req.user.id),
+            status: 'New',
+            uploadDate: new Date(),
+            originalName: req.file.originalname,
+            fileName: req.file.filename,
+            filePath: `/uploads/${req.file.filename}`, // <-- THE CORRECTION IS HERE
+            wordCount, serviceType, docType, subjectArea, langStyle, formatting,
+            instructions, editScope, startWork,
+            submitterInfo: {
+                salutation, firstName, lastName, email, mobile
+            },
+            howHeard
+        };
+        
+        const result = await manuscriptsCollection.insertOne(manuscriptData);
+        res.status(201).json({ message: 'Manuscript submitted successfully!', manuscriptId: result.insertedId });
+
+    } catch (error) {
+        console.error("Submission error:", error);
+        res.status(500).json({ error: 'Error submitting manuscript.' });
+    }
+});
+
+        // --- EDITOR & ADMIN ROUTES ---
+        app.get('/editor/my-jobs', authenticateToken, async (req, res) => { /* ... same as before ... */ });
+        app.post('/admin/login', (req, res) => { /* ... same as before ... */ });
+        app.get('/admin/dashboard', authenticateAdmin, async (req, res) => { /* ... same as before ... */ });
+        app.get('/admin/editors', authenticateAdmin, async (req, res) => { /* ... same as before ... */ });
+        app.post('/admin/assign-job/:manuscriptId', authenticateAdmin, async (req, res) => { /* ... same as before ... */ });
 
         app.listen(port, () => {
             console.log(`Server running on port ${port}`);

@@ -147,7 +147,7 @@ async function startServer() {
         app.get('/profile', authenticateToken, async (req, res) => { /* ... same as before ... */ });
         app.post('/profile/update', authenticateToken, async (req, res) => { /* ... same as before ... */ });
 
-        // REPLACE your existing '/submit-manuscript' route with this corrected version
+        // REPLACE your existing '/submit-manuscript' route with this corrected version forever
 
         app.post('/submit-manuscript', authenticateToken, upload.single('manuscriptFile'), async (req, res) => {
     try {
